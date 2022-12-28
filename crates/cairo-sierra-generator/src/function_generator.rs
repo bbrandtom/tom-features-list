@@ -26,8 +26,8 @@ use crate::pre_sierra::{self, Statement};
 use crate::specialization_context::SierraSignatureSpecializationContext;
 use crate::store_variables::{add_store_statements, LibFuncInfo, LocalVariables};
 use crate::utils::{
-    alloc_local_libfunc_id, drop_libfunc_id, dup_libfunc_id, finalize_locals_libfunc_id,
-    get_libfunc_signature, simple_statement,
+    alloc_local_libfunc_id, dup_libfunc_id, finalize_locals_libfunc_id, get_libfunc_signature,
+    simple_statement,
 };
 use crate::SierraGeneratorDiagnostic;
 
@@ -189,7 +189,7 @@ fn allocate_local_variables(
     Ok((sierra_local_variables, statements))
 }
 
-/// Adds drops and duplicates of felts to the sierra code.
+/// Adds dup() statements to the Sierra code.
 ///
 /// Assumes no Sierra variable is reused in the same line.
 fn add_dups_and_drops(
@@ -200,17 +200,8 @@ fn add_dups_and_drops(
     let statement_dups_and_drops = calculate_statement_dups_and_drops(params, &statements);
     let var_types = get_var_types(params, &statements, context.get_db());
     zip_eq(statements.into_iter(), statement_dups_and_drops.into_iter())
-        .flat_map(|(mut statement, VarsDupsAndDrops { mut dups, drops })| {
-            let mut expanded_statement: Vec<Statement> = drops
-                .into_iter()
-                .map(|var| {
-                    simple_statement(
-                        drop_libfunc_id(context.get_db(), var_types[var.clone()].clone()),
-                        &[var],
-                        &[],
-                    )
-                })
-                .collect();
+        .flat_map(|(mut statement, VarsDupsAndDrops { mut dups, drops: _ })| {
+            let mut expanded_statement: Vec<Statement> = vec![];
             if let Statement::Sierra(cairo_sierra::program::GenStatement::Invocation(invocation)) =
                 &mut statement
             {
