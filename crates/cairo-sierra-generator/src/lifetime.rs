@@ -44,9 +44,13 @@ impl VariableLifetimeResult {
 
 /// Given the lowering of a function, returns lifetime information for all the variables.
 /// See [VariableLifetimeResult].
-pub fn find_variable_lifetime(lowered_function: &Lowered) -> Maybe<VariableLifetimeResult> {
+pub fn find_variable_lifetime(
+    lowered_function: &Lowered,
+    local_vars: &[VariableId],
+) -> Maybe<VariableLifetimeResult> {
     let mut context = VariableLifetimeContext {
         lowered_function,
+        local_vars,
         res: VariableLifetimeResult::default(),
     };
     let mut state = VariableLifetimeState::default();
@@ -59,6 +63,7 @@ pub fn find_variable_lifetime(lowered_function: &Lowered) -> Maybe<VariableLifet
 /// Context information for [inner_find_variable_lifetime] and its helper functions.
 struct VariableLifetimeContext<'a> {
     lowered_function: &'a Lowered,
+    local_vars: &'a [VariableId],
     res: VariableLifetimeResult,
 }
 

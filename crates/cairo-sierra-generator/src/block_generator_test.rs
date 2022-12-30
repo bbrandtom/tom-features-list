@@ -52,8 +52,9 @@ fn block_generator_test(
 
     // Generate (pre-)Sierra statements.
     let mut diagnostics = DiagnosticsBuilder::<SierraGeneratorDiagnostic>::default();
+    // TODO: fix &[].
     let lifetime =
-        find_variable_lifetime(&lowered).expect("Failed to retrieve lifetime information.");
+        find_variable_lifetime(&lowered, &[]).expect("Failed to retrieve lifetime information.");
     let mut expr_generator_context = ExprGeneratorContext::new(
         db,
         &lowered,
