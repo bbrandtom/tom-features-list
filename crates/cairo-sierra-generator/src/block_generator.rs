@@ -10,7 +10,7 @@ use cairo_utils::ordered_hash_map::OrderedHashMap;
 use itertools::{chain, enumerate, zip_eq};
 
 use crate::expr_generator_context::ExprGeneratorContext;
-use crate::lifetime::DropLocation;
+use crate::lifetime::{DropLocation, DropVariable};
 use crate::pre_sierra;
 use crate::utils::{
     branch_align_libfunc_id, const_libfunc_id_by_type, drop_libfunc_id, enum_init_libfunc_id,
@@ -54,15 +54,23 @@ pub fn generate_block_code(
 
 fn add_drop_statements(
     context: &mut ExprGeneratorContext<'_>,
-    drops: &OrderedHashMap<DropLocation, Vec<lowering::VariableId>>,
+    drops: &OrderedHashMap<DropLocation, Vec<DropVariable>>,
     drop_location: &DropLocation,
     statements: &mut Vec<pre_sierra::Statement>,
 ) -> Maybe<()> {
     let Some(vars) = drops.get(drop_location)  else { return Ok(()) };
 
-    for lowering_var in vars {
-        let sierra_var = context.get_sierra_variable(*lowering_var);
-        let ty = context.get_variable_sierra_type(*lowering_var)?;
+    for gen_var in vars {
+        // TODO: rename
+        let (sierra_var, ty) = match gen_var {
+            DropVariable::Var(lowering_var) => (
+                context.get_sierra_variable(*lowering_var),
+                context.get_variable_sierra_type(*lowering_var)?,
+            ),
+            DropVariable::UninitializedLocal(lowering_var) => {
+                
+            },
+        };
         statements.push(simple_statement(
             drop_libfunc_id(context.get_db(), ty),
             &[sierra_var],

@@ -7,6 +7,7 @@ use cairo_lowering::lower::Lowered;
 use cairo_lowering::{BlockId, VariableId};
 use cairo_utils::ordered_hash_map::OrderedHashMap;
 use cairo_utils::ordered_hash_set::OrderedHashSet;
+use cairo_utils::unordered_hash_set::UnorderedHashSet;
 
 pub type StatementLocation = (BlockId, usize);
 
@@ -15,6 +16,12 @@ pub type StatementLocation = (BlockId, usize);
 pub enum DropLocation {
     BeginningOfBlock(BlockId),
     PostStatement(StatementLocation),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum DropVariable {
+    Var(VariableId),
+    UninitializedLocal(VariableId),
 }
 
 /// Information returned by [find_variable_lifetime] regarding the lifetime of variables.
@@ -29,11 +36,11 @@ pub struct VariableLifetimeResult {
     /// this means that the last use was in `block.end`.
     pub last_use: OrderedHashMap<VariableId, Vec<StatementLocation>>,
     /// A map from [DropLocation] to the list of variables that should be dropped at this location.
-    pub drops: OrderedHashMap<DropLocation, Vec<VariableId>>,
+    pub drops: OrderedHashMap<DropLocation, Vec<DropVariable>>,
 }
 impl VariableLifetimeResult {
     /// Registers where a drop statement should appear.
-    fn add_drop(&mut self, var_id: VariableId, drop_location: DropLocation) {
+    fn add_drop(&mut self, var_id: DropVariable, drop_location: DropLocation) {
         if let Some(vars) = self.drops.get_mut(&drop_location) {
             vars.push(var_id);
         } else {
@@ -50,7 +57,7 @@ pub fn find_variable_lifetime(
 ) -> Maybe<VariableLifetimeResult> {
     let mut context = VariableLifetimeContext {
         lowered_function,
-        local_vars,
+        local_vars: &local_vars.iter().map(|var| *var).collect(),
         res: VariableLifetimeResult::default(),
     };
     let mut state = VariableLifetimeState::default();
@@ -63,7 +70,7 @@ pub fn find_variable_lifetime(
 /// Context information for [inner_find_variable_lifetime] and its helper functions.
 struct VariableLifetimeContext<'a> {
     lowered_function: &'a Lowered,
-    local_vars: &'a [VariableId],
+    local_vars: &'a UnorderedHashSet<VariableId>,
     res: VariableLifetimeResult,
 }
 
@@ -137,7 +144,7 @@ fn handle_match(
     state: &mut VariableLifetimeState,
 ) {
     // A map from sub-blocks to the set of new last-used variables.
-    let mut block_to_used_vars = OrderedHashMap::<BlockId, OrderedHashSet<VariableId>>::default();
+    let mut block_to_used_vars = OrderedHashMap::<BlockId, OrderedHashSet<DropVariable>>::default();
 
     for block_id in arm_blocks {
         let mut state_clone = state.clone();
@@ -150,7 +157,7 @@ fn handle_match(
     }
 
     // Collect all the new used variables, from all the arms.
-    let mut all_used_variables = OrderedHashSet::<VariableId>::default();
+    let mut all_used_variables = OrderedHashSet::<DropVariable>::default();
     for (_block_id, used_variables) in block_to_used_vars.iter() {
         all_used_variables.extend(used_variables.clone());
     }
@@ -171,7 +178,7 @@ fn handle_match(
 #[derive(Clone, Debug)]
 struct VariableLifetimeState {
     /// A set of all the variables used after the current processed statement.
-    used_variables: OrderedHashSet<VariableId>,
+    used_variables: OrderedHashSet<DropVariable>,
 }
 impl VariableLifetimeState {
     fn default() -> Self {
@@ -181,7 +188,7 @@ impl VariableLifetimeState {
     /// Marks the given set of variables as used.
     ///
     /// Called with the new used variables of sub-blocks of a match statement.
-    fn extend_with_used_variables(&mut self, vars: OrderedHashSet<VariableId>) {
+    fn extend_with_used_variables(&mut self, vars: OrderedHashSet<DropVariable>) {
         self.used_variables.extend(vars.clone());
     }
 
@@ -201,14 +208,22 @@ impl VariableLifetimeState {
         drop_location: DropLocation,
     ) {
         for var_id in var_ids {
-            if !self.used_variables.contains(var_id) {
+            // TODO: rename.
+            let gen_var = DropVariable::Var(*var_id);
+            if !self.used_variables.contains(&gen_var) {
                 // The variable will not be used, drop it.
-                context.res.add_drop(*var_id, drop_location);
+                context.res.add_drop(gen_var, drop_location);
             } else {
                 // When a variable is defined and used in one match branch, we don't need to drop
                 // it in the other branch (unlike the cases where it is defined before the match).
                 // Therefore, we remove it from `used_variables`.
-                self.used_variables.swap_remove(var_id);
+                self.used_variables.swap_remove(&gen_var);
+            }
+
+            if context.local_vars.contains(var_id) {
+                // When a local variable is defined, the corresponding uninitialized variable is
+                // used (by the `store_local` libfunc).
+                self.used_variables.insert(DropVariable::UninitializedLocal(*var_id));
             }
         }
     }
@@ -221,7 +236,9 @@ impl VariableLifetimeState {
         statement_location: StatementLocation,
     ) {
         for var_id in var_ids {
-            if self.used_variables.insert(*var_id) {
+            // TODO: rename.
+            let gen_var = DropVariable::Var(*var_id);
+            if self.used_variables.insert(gen_var) {
                 // This is the last use of the variable.
                 if let Some(statement_locations) = context.res.last_use.get_mut(var_id) {
                     statement_locations.push(statement_location);

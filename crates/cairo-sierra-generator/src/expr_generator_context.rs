@@ -8,7 +8,7 @@ use cairo_utils::unordered_hash_map::UnorderedHashMap;
 use crate::db::SierraGenGroup;
 use crate::diagnostic::SierraGeneratorDiagnosticKind;
 use crate::id_allocator::IdAllocator;
-use crate::lifetime::{DropLocation, VariableLifetimeResult};
+use crate::lifetime::{DropLocation, DropVariable, VariableLifetimeResult};
 use crate::{pre_sierra, SierraGeneratorDiagnostic};
 
 /// Context for the methods that generate Sierra instructions for an expression.
@@ -121,7 +121,7 @@ impl<'a> ExprGeneratorContext<'a> {
     }
 
     /// Returns the places where variables should be dropped. See [VariableLifetimeResult::drops].
-    pub fn get_drops(&self) -> &'a OrderedHashMap<DropLocation, Vec<cairo_lowering::VariableId>> {
+    pub fn get_drops(&self) -> &'a OrderedHashMap<DropLocation, Vec<DropVariable>> {
         &self.lifetime.drops
     }
 }
