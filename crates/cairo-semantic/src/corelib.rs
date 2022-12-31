@@ -30,6 +30,10 @@ pub fn core_nonzero_ty(db: &dyn SemanticGroup, inner_type: TypeId) -> TypeId {
     get_core_ty_by_name(db, "NonZero".into(), vec![GenericArgumentId::Type(inner_type)])
 }
 
+pub fn core_uninitialized_ty(db: &dyn SemanticGroup, inner_type: TypeId) -> TypeId {
+    get_core_ty_by_name(db, "Uninitialized".into(), vec![GenericArgumentId::Type(inner_type)])
+}
+
 pub fn try_get_core_ty_by_name(
     db: &dyn SemanticGroup,
     name: SmolStr,

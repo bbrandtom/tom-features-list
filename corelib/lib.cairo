@@ -219,4 +219,7 @@ use hash::Pedersen;
 mod starknet;
 use starknet::System;
 
+// Local variables.
+extern type Uninitialized<T>;
+
 mod test;

@@ -12,9 +12,10 @@ use cairo_sierra::extensions::GenericLibFuncEx;
 use cairo_sierra::ids::{ConcreteLibFuncId, GenericLibFuncId};
 use cairo_sierra::program::Param;
 use cairo_utils::ordered_hash_map::OrderedHashMap;
-use cairo_utils::ordered_hash_set::OrderedHashSet;
 use cairo_utils::unordered_hash_map::UnorderedHashMap;
 use itertools::zip_eq;
+use semantic::corelib::core_uninitialized_ty;
+use {cairo_lowering as lowering, cairo_semantic as semantic};
 
 use crate::block_generator::{generate_block_code, generate_return_code};
 use crate::db::SierraGenGroup;
@@ -69,21 +70,39 @@ fn get_function_code(
     function_id: FreeFunctionId,
 ) -> Maybe<Arc<pre_sierra::Function>> {
     let signature = db.free_function_declaration_signature(function_id)?;
-    let lowered_function = &*db.free_function_lowered(function_id)?;
+    let mut lowered_function = (*db.free_function_lowered(function_id)?).clone();
     let block_id = lowered_function.root?;
     let block = &lowered_function.blocks[block_id];
 
     // Find the local variables.
-    let local_variables = find_local_variables(db, lowered_function)?;
+    let local_variables_set = find_local_variables(db, &lowered_function)?;
+
+    let local_variables: OrderedHashMap<lowering::VariableId, lowering::VariableId> =
+        local_variables_set
+            .iter()
+            .map(|var_id| {
+                let var_ty = lowered_function.variables[*var_id].ty;
+                let uninitialized_ty = core_uninitialized_ty(db.upcast(), var_ty);
+                //     ConcreteTypeId::Extern
+                //     db.intern_concrete_type(ConcreteTypeLongId {
+                //         generic_id: UninitializedType::id(),
+                //         generic_args: vec![GenericArg var_ty],
+                //     }),
+                // ));
+                let uninitialized_var = lowering::Variable {
+                    droppable: true,
+                    duplicatable: false,
+                    ty: uninitialized_ty,
+                };
+                (*var_id, lowered_function.variables.alloc(uninitialized_var))
+            })
+            .collect();
 
     // Get lifetime information.
-    let lifetime = find_variable_lifetime(
-        lowered_function,
-        &local_variables.iter().map(|var_id| var_id.clone()).collect::<Vec<_>>(),
-    )?;
+    let lifetime = find_variable_lifetime(&lowered_function, &local_variables)?;
 
     let mut context =
-        ExprGeneratorContext::new(db, lowered_function, function_id, &lifetime, diagnostics);
+        ExprGeneratorContext::new(db, &lowered_function, function_id, &lifetime, diagnostics);
 
     // Generate a label for the function's body.
     let (label, label_id) = context.new_label();
@@ -114,11 +133,11 @@ fn get_function_code(
 
     // Generate the return statement if necessary.
     match &block.end {
-        cairo_lowering::BlockEnd::Callsite(returned_variables)
-        | cairo_lowering::BlockEnd::Return(returned_variables) => {
+        lowering::BlockEnd::Callsite(returned_variables)
+        | lowering::BlockEnd::Return(returned_variables) => {
             statements.extend(generate_return_code(&mut context, returned_variables)?);
         }
-        cairo_lowering::BlockEnd::Unreachable => {}
+        lowering::BlockEnd::Unreachable => {}
     };
 
     let drop_id = GenericLibFuncId::from_string("drop");
@@ -164,14 +183,15 @@ fn get_function_code(
 /// * A list of Sierra statements.
 fn allocate_local_variables(
     context: &mut ExprGeneratorContext<'_>,
-    local_variables: &OrderedHashSet<cairo_lowering::VariableId>,
+    local_variables: &OrderedHashMap<lowering::VariableId, lowering::VariableId>,
 ) -> Maybe<(LocalVariables, Vec<Statement>)> {
     let mut statements: Vec<pre_sierra::Statement> = vec![];
     let mut sierra_local_variables =
         OrderedHashMap::<cairo_sierra::ids::VarId, cairo_sierra::ids::VarId>::default();
-    for lowering_var_id in local_variables.iter() {
+    for (lowering_var_id, uninitialized_lowering_var_id) in local_variables.iter() {
         let sierra_var_id = context.get_sierra_variable(*lowering_var_id);
-        let uninitialized_local_var_id = context.allocate_sierra_variable();
+        let uninitialized_local_var_id =
+            context.get_sierra_variable(*uninitialized_lowering_var_id);
         statements.push(simple_statement(
             alloc_local_libfunc_id(
                 context.get_db(),

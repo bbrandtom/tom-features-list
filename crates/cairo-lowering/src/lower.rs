@@ -39,7 +39,7 @@ mod semantic_map;
 mod variables;
 
 /// A lowered function code.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lowered {
     /// Diagnostics produced while lowering.
     pub diagnostics: Diagnostics<LoweringDiagnostic>,
